@@ -3,7 +3,7 @@ from deepeval import evaluate
 from agent_instrumented import support_agent
 import deepeval.metrics as TaskCompletionMetric
 
-actual_output = support_agent("Where is my ordder ORD-1042?")
+actual_output = support_agent("Where is my order ORD-1042?")
 
 test_case = LLMTestCase(
     input = "Where is my order ORD-1042?",
