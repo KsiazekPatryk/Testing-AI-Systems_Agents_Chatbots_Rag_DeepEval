@@ -1,3 +1,5 @@
+> 🇵🇱 **[Polska wersja tego dokumentu → poniżej](#wersja-polska)** · Powrót: [README projektu](../README.md)
+
 # Introduction — Why AI Needs a Completely Different Kind of Testing
 
 > **Read this before opening any test file.** This document sets the foundation for everything that follows. It answers four questions:
@@ -408,4 +410,423 @@ Everything in `test_agent.py` is a direct application of the concepts from this 
   ---
   So the docs example is essentially the static pattern applied to tool testing — useful if you already have a captured conversation log and want to check if
   the right tools fired. But if you want to test the live agent, tracing is what makes it work without you having to hardcode anything.
+
+---
+---
+
+# Wersja polska
+
+> ⬆️ [Back to the English version](#introduction--why-ai-needs-a-completely-different-kind-of-testing)
+
+# Wprowadzenie — dlaczego AI wymaga zupełnie innego rodzaju testowania
+
+> **Przeczytaj to, zanim otworzysz jakikolwiek plik z testami.** Ten dokument stanowi fundament dla wszystkiego, co następuje. Odpowiada na cztery pytania:
+> 1. Co dokładnie testujemy, gdy mówimy „testowanie systemu AI"?
+> 2. Dlaczego nie możemy go testować tak, jak tradycyjnego oprogramowania?
+> 3. Czym są Evals i jak implementuje je DeepEval?
+> 4. Czym jest Judge LLM i dlaczego go potrzebujemy?
+>
+> Gdy oswoisz się z tymi pojęciami, `test_agent.py` (pierwszy plik z testami) stanie się od razu zrozumiały.
+
+---
+
+## 1. Czym dokładnie jest testowanie AI?
+
+Kiedy ktoś mówi „przetestuj aplikację webową", dokładnie wiesz, co to znaczy — kliknąć przycisk, sprawdzić bazę danych, zweryfikować kod odpowiedzi. System jest dobrze zdefiniowany: dane wejściowe wchodzą, przewidywalne dane wyjściowe wychodzą.
+
+Systemy AI są jednak inne. Nie istnieje jeden „kształt" aplikacji AI. W tym kursie mamy do czynienia z czterema różnymi typami systemów AI, a każdy ma własne wyzwania testowe:
+
+### 1.1 Agenci AI
+
+Agent AI to LLM, który potrafi **podejmować akcje** — sam decyduje, które narzędzia wywołać, w jakiej kolejności i z jakimi argumentami, a następnie interpretuje wyniki, aby sformułować końcową odpowiedź.
+
+**Przykład z naszego kodu:** `agent_plain.py` to agent obsługi klienta z dwoma narzędziami — `get_order_status()` i `get_refund_policy()`. Gdy użytkownik pyta „Gdzie jest moje zamówienie ORD-1042?", agent musi:
+1. **Zdecydować**, że to pytanie o status zamówienia (a nie o zwroty).
+2. **Wybrać** narzędzie `get_order_status`.
+3. **Wyciągnąć** identyfikator zamówienia „ORD-1042" z wiadomości użytkownika i przekazać go jako argument.
+4. **Zinterpretować** odpowiedź narzędzia i sformułować pomocną odpowiedź.
+
+**Co może pójść nie tak:**
+- Agent wywołuje złe narzędzie (pyta o politykę zwrotów, gdy użytkownik chce poznać status zamówienia).
+- Agent wywołuje właściwe narzędzie ze złymi argumentami (przekazuje „1042" zamiast „ORD-1042").
+- Agent wywołuje właściwe narzędzie, dostaje właściwe dane, ale błędnie je interpretuje lub zniekształca w końcowej odpowiedzi.
+- Agent wywołuje niepotrzebne dodatkowe narzędzia, tracąc czas i pieniądze.
+- Agent ignoruje instrukcje z system promptu (wychodzi poza markę, daje długie odpowiedzi, mimo że miał być zwięzły).
+
+Każdy z tych rodzajów błędów wymaga innej strategii oceny. Dlatego `test_agent.py` używa **TaskCompletionMetric** (czy całe zadanie zostało wykonane?) oraz **ToolCorrectnessMetric** (czy wybrano właściwe narzędzie?).
+
+### 1.2 Narzędzia MCP (Model Context Protocol)
+
+MCP to protokół, który pozwala agentom AI łączyć się z **zewnętrznymi serwerami narzędzi**. Zamiast definiować narzędzia bezpośrednio w kodzie, agent odkrywa je dynamicznie z serwera MCP w czasie działania.
+
+**Przykład z naszego kodu:** `mcp_server.py` udostępnia przez MCP narzędzie `get_shipping_options`. Agent z instrumentacją w `agent_instrumented.py` łączy się z tym serwerem MCP przy starcie i dodaje narzędzie do wysyłki do swojego zestawu obok zwykłych narzędzi w Pythonie.
+
+**Czym różni się testowanie MCP:**
+- Agent nie wywołuje tylko lokalnej funkcji — wywołuje narzędzie odkryte w czasie działania na zewnętrznym serwerze.
+- Nazwy i opisy narzędzi pochodzą z serwera MCP, a nie z kodu agenta.
+- Agent musi poprawnie rozpoznać, że pytanie użytkownika o wysyłkę należy skierować do narzędzia MCP, a nie do narzędzi zdefiniowanych lokalnie.
+
+W `test_agent.py` czwarty golden testuje dokładnie to — pyta „Jakie opcje wysyłki oferujecie?" i oczekuje, że agent wywoła `get_shipping_options`, czyli narzędzie udostępniane przez MCP. Mechanika testu jest taka sama (ToolCorrectnessMetric nie rozróżnia, czy narzędzie jest lokalne, czy z MCP), ale *powierzchnia integracji* jest szersza.
+
+### 1.3 Chatboty (rozmowy wieloturowe)
+
+Chatbot przechowuje historię rozmowy przez wiele wiadomości użytkownika. W przeciwieństwie do jednoturowego agenta, który przetwarza jedno pytanie w izolacji, chatbot musi pamiętać, co zostało powiedziane wcześniej, i przez całą rozmowę pozostawać w swojej roli.
+
+**Przykład z naszego kodu:** `chatbot.py` to wieloturowy bot wsparcia. Użytkownik może napisać:
+- Tura 1: „Mój numer zamówienia to ORD-1042."
+- Tura 2: „Czy dotrze na czas?"
+- Tura 3: „Jaki był ten termin dostawy, o którym wspomniałeś?"
+
+Chatbot musi przenosić kontekst dalej — musi pamiętać numer zamówienia z tury 1, aby odpowiedzieć w turze 2, oraz termin dostawy podany w turze 2, aby odpowiedzieć w turze 3.
+
+**Co może pójść nie tak:**
+- Chatbot zapomina informacje z wcześniejszych tur (błąd pamięci).
+- Chatbot wypada z roli — np. bot obsługi klienta zaczyna doradzać w gotowaniu.
+- Pojedyncze tury są nie na temat, nawet jeśli cała rozmowa wydaje się rozsądna.
+- Rozmowa technicznie postępuje, ale nigdy nie rozwiązuje problemu klienta.
+
+Takie błędy wymagają **metryk konwersacyjnych**: KnowledgeRetention, RoleAdherence, TurnRelevancy i ConversationalGEval — wszystkie opisane w `test_chatbot.py`.
+
+### 1.4 RAG (Retrieval-Augmented Generation)
+
+Agent RAG nie polega na wiedzy z treningu LLM, aby odpowiadać na pytania. Zamiast tego najpierw **wyszukuje** odpowiednie dokumenty w bazie wiedzy, a potem używa ich jako kontekstu do wygenerowania odpowiedzi.
+
+**Przykład z naszego kodu:** `rag_agent.py` ma magazyn wektorowy z 9 dokumentami polityk (wysyłka, zwroty, anulowanie itd.). Gdy użytkownik pyta „Jaka jest polityka zwrotów dla elektroniki?", agent:
+1. **Wyszukuje** 3 najbardziej trafne dokumenty polityk z magazynu wektorowego.
+2. **Czyta** te dokumenty.
+3. **Generuje** odpowiedź na podstawie pobranej treści.
+
+**Co może pójść nie tak — błędy specyficzne dla RAG:**
+- **Halucynacja:** Agent mówi coś, czego nie ma w pobranych dokumentach. Z wyszukiwania wynika „15 dni", a agent mówi „30 dni".
+- **Zły ranking wyszukiwania:** Najtrafniejszy dokument jest na 3. miejscu, a nieistotne na 1. i 2. LLM może przeoczyć ten ważny.
+- **Niepełne wyszukiwanie:** Baza wiedzy zawiera odpowiedź, ale mechanizm wyszukiwania nie wyciągnął właściwego dokumentu.
+- **Nietrafna odpowiedź:** Pobrane dokumenty są w porządku, ale agent mimo to odpowiada nie na temat.
+
+Testowanie RAG wymaga wyspecjalizowanego zestawu metryk (Faithfulness, ContextualPrecision, ContextualRecall, AnswerRelevancy) opisanych w `test_rag_agent.py`.
+
+---
+
+## 2. Dlaczego tradycyjne testowanie nie działa
+
+### Problem determinizmu
+
+Tradycyjne testowanie oprogramowania opiera się na jednym fundamentalnym założeniu: **te same dane wejściowe zawsze dają te same dane wyjściowe.**
+
+```
+# Tradycyjny test — działa, bo oprogramowanie jest deterministyczne
+assert add(2, 3) == 5          # Zawsze prawda. Za każdym razem. Na zawsze.
+assert login("admin", "pass123") == "Welcome, admin!"  # Przewidywalne.
+```
+
+Piszesz asercję. Uruchamiasz ją 1000 razy. Przechodzi 1000 razy. Jeśli zawiedzie, coś jest zepsute.
+
+Spróbuj teraz tego samego z agentem AI:
+
+```
+# Test agenta AI — to NIE działa
+response = support_agent("Where is my order ORD-1042?")
+assert response == "Order ORD-1042 is Shipped. ETA: 2026-05-13."
+```
+
+**Dlaczego to zawodzi:** Uruchom to 10 razy, a możesz dostać 10 nieco różnych odpowiedzi:
+- „Order ORD-1042 has been shipped and should arrive by May 13, 2026."
+- „Your order ORD-1042 is currently shipped! Expected delivery: 2026-05-13."
+- „I checked your order — ORD-1042 is on its way! It's expected to arrive by May 13th."
+- „Great news! Order ORD-1042 has shipped. ETA is May 13, 2026."
+
+Wszystkie cztery odpowiedzi są **poprawne**. Wszystkie przekazują tę samą informację. Ale żadna nie pasuje do dokładnego ciągu znaków z asercji. Test zawodzi w 100% przypadków, mimo że agent działa doskonale.
+
+### Dlaczego systemy AI są niedeterministyczne
+
+LLM generują tekst przez **próbkowanie z rozkładów prawdopodobieństwa**.
+
+...Dla tych samych danych wejściowych mogą zwracać różne wyniki. A przy temperature > 0 ta zmienność jest zamierzona i wynika z projektu.
+
+### Pułapka dopasowywania ciągów znaków
+
+Instynkt tradycyjnego testowania każe dopasowywać ciągi znaków:
+
+```
+# Wszystkie poniższe to złe pomysły w testowaniu AI:
+assert "shipped" in response.lower()        # A co, jeśli napisze "on its way"?
+assert response.startswith("Order ORD")     # A co, jeśli napisze "Your order"?
+assert len(response) < 100                  # Arbitralne, ignoruje jakość treści
+```
+
+Możesz bawić się w „whack-a-mole" z wyrażeniami regularnymi i sprawdzaniem podciągów, ale nigdy nie pokryjesz całej przestrzeni poprawnych odpowiedzi. Więcej czasu spędzisz na utrzymywaniu asercji niż na faktycznym testowaniu agenta.
+
+### Co naprawdę chcemy testować
+
+Pytanie nie brzmi „czy agent wyprodukował dokładnie ten ciąg znaków?" — brzmi:
+
+- **Czy agent podał właściwą informację?** (poprawność semantyczna, a nie dopasowanie ciągów)
+- **Czy użył właściwego narzędzia?** (behawioralnie, a nie na podstawie wyniku)
+- **Czy odpowiedź była trafna względem pytania?** (ocena semantyczna)
+- **Czy przestrzegał swoich instrukcji?** (kontrola zgodności)
+- **Czy był efektywny?** (liczenie kroków, a nie sprawdzanie wyniku)
+- **Czy halucynował?** (oparcie faktów w źródłach)
+- **Czy był bezpieczny, bezstronny i chronił prywatność?** (guardrails)
+
+Na żadne z tych pytań nie da się odpowiedzieć przez `assert response == expected`. Każde wymaga **osądu** — zdolności przeczytania odpowiedzi, zrozumienia jej znaczenia i oceny jej jakości.
+
+Tu wchodzą **Evals**.
+
+---
+
+## 3. Czym są Evals? Jak działa DeepEval?
+
+### Evals — koncepcja
+
+„Eval" to skrót od **evaluation** (ewaluacja). W świecie AI eval to ustrukturyzowany, powtarzalny proces mierzenia, jak dobrze system AI radzi sobie w konkretnym wymiarze jakości.
+
+Pomyśl o tym tak:
+
+| Tradycyjne testowanie | Evals w AI |
+|---|---|
+| Binarne: przeszedł lub nie | Punktowane: od 0.0 do 1.0 |
+| Dokładne dopasowanie | Ocena semantyczna |
+| Deterministyczne | Probabilistyczne |
+| „Czy wynik jest poprawny?" | „Jak dobry jest wynik?" |
+| Pisane przez inżynierów QA | Oceniane przez inny LLM |
+
+Eval nie pyta „czy to jest dokładnie dobrze?" — pyta „jak dobre to jest w skali?", a następnie ustawiasz **próg (threshold)**, który decyduje, co jest wystarczająco dobre.
+
+### DeepEval — framework
+
+DeepEval to open-source'owy framework w Pythonie do oceny aplikacji opartych na LLM. Dostarcza:
+
+1. **Metryki** — gotowe kryteria oceny (AnswerRelevancy, Faithfulness, ToolCorrectness itd.) oraz możliwość definiowania własnych kryteriów przez GEval.
+2. **Przypadki testowe** — ustrukturyzowane kontenery na dane wejściowe, wyjściowe i oczekiwane wartości (Golden).
+3. **Judge LLM** — LLM, który ocenia wyniki (wyjaśniony w sekcji 4 poniżej).
+4. **Tracing/instrumentację** — integracje z LangChain, OpenAI itd., które automatycznie rejestrują, co zrobił agent (wywołania narzędzi, kroki pośrednie, pobrane dokumenty).
+5. **Runner testów** — integrację z pytest lub samodzielne metody `evaluate()` / `evals_iterator()`.
+
+### Jak krok po kroku działa ewaluacja w DeepEval
+
+Oto, co się dzieje, gdy uruchamiasz plik testowy taki jak `test_agent.py`:
+
+```
+Krok 1: Zdefiniuj dane testowe
+    ┌──────────────────────────────────────────────────────┐
+    │  Golden(                                             │
+    │      input="Where is my order ORD-1042?",            │
+    │      expected_tools=[ToolCall(name="get_order_status")]│
+    │  )                                                   │
+    └──────────────────────────────────────────────────────┘
+    „Golden" to jeden scenariusz testowy — dane wejściowe, które
+    wyślesz do agenta, plus oczekiwane wartości do porównania.
+
+Krok 2: Wybierz metryki
+    ┌──────────────────────────────────────────────────────┐
+    │  task_completion  = TaskCompletionMetric(threshold=0.7)│
+    │  tool_correctness = ToolCorrectnessMetric()           │
+    └──────────────────────────────────────────────────────┘
+    Każda metryka potrafi ocenić jeden wymiar jakości.
+    Próg (threshold) to TWOJA definicja „wystarczająco dobrego".
+
+Krok 3: Uruchom agenta
+    ┌──────────────────────────────────────────────────────┐
+    │  support_agent("Where is my order ORD-1042?")        │
+    └──────────────────────────────────────────────────────┘
+    Agent działa naprawdę — wywołuje narzędzia, generuje
+    odpowiedź. Instrumentacja DeepEval rejestruje wszystko
+    jako „trace" (sekwencję kroków wykonanych przez agenta).
+
+Krok 4: Judge LLM ocenia trace
+    ┌──────────────────────────────────────────────────────┐
+    │  Judge (GPT-4o) analizuje:                           │
+    │    - dane wejściowe użytkownika                      │
+    │    - pełny trace wykonania agenta                    │
+    │    - końcową odpowiedź                               │
+    │    - oczekiwane wartości z Golden                    │
+    │                                                      │
+    │  Wystawia wynik: 0.85                                │
+    │  Próg wynosił 0.7 → PASS ✓                           │
+    └──────────────────────────────────────────────────────┘
+```
+
+### Jak działa punktacja
+
+Każda metryka DeepEval zwraca wynik od **0.0 do 1.0**:
+
+| Wynik | Znaczenie |
+|-------|-----------|
+| 1.0 | Idealnie — wynik w pełni spełnia metrykę |
+| 0.7–0.9 | Dobrze — drobne usterki, ale ogólnie solidnie |
+| 0.4–0.6 | Średnio — jest duże pole do poprawy |
+| 0.1–0.3 | Słabo — wykryto poważne błędy |
+| 0.0 | Całkowita porażka w tej metryce |
+
+Dla każdej metryki ustawiasz **próg (threshold)** — to Twoja linia pass/fail. Jeśli wynik jest równy progowi lub wyższy, test przechodzi. Jeśli niższy — test nie przechodzi.
+
+**Próg to decyzja projektowa, a nie reguła.** Różne metryki i różne przypadki użycia uzasadniają różne progi:
+
+- **Metryki jakości** (AnswerRelevancy, TaskCompletion, GEval): zwykle `0.7` — chcesz wysokiej jakości, ale dopuszczasz pewną elastyczność.
+- **Metryki bezpieczeństwa** (Bias, Toxicity, PII): w naszych plikach ustawione na `0.5` — te wyniki mogą być zaszumione, ale każdy system produkcyjny powinien ustawiać je wyżej.
+- **Metryki efektywności** (StepEfficiency): zwykle `0.5` — agenci rzadko wybierają teoretycznie optymalną ścieżkę, więc dopuszczasz większy luz.
+
+### Dwa typy metryk — deterministyczne vs. oceniane przez LLM
+
+Nie wszystkie metryki używają judge LLM:
+
+**Metryki deterministyczne** liczą wynik ścisłą logiką — bez udziału LLM:
+- `ToolCorrectnessMetric` — porównuje faktyczne wywołania narzędzi z oczekiwanymi. To porównanie zbiorów. Agent albo wywołał `get_order_status`, albo nie. Nie trzeba niczego interpretować.
+
+**Metryki oceniane przez LLM** proszą inny LLM o ocenę jakości:
+- `TaskCompletionMetric` — nie istnieje wzór na „czy agent ukończył zadanie". Trzeba zrozumieć intencję użytkownika, działania agenta i to, czy wynik ma sens. Ocenić to może tylko LLM.
+- `AnswerRelevancyMetric`, `FaithfulnessMetric`, `GEval` i wszystkie metryki bezpieczeństwa — wszystkie wymagają semantycznego rozumienia, które zapewnić może tylko LLM.
+
+---
+
+## 4. Judge LLM — dlaczego drugi LLM ocenia pierwszego
+
+### Główna idea
+
+Skoro nie możemy używać dopasowywania ciągów znaków do oceny wyników AI, a do oceny jakości potrzebujemy rozumienia semantycznego — kto ma oceniać? Odpowiedź: **inny LLM**.
+
+To jest **Judge LLM** (zwany też „modelem oceniającym"). To osobny LLM, którego zadaniem jest przeczytać pracę agenta i ją ocenić.
+
+```
+┌─────────────┐       ┌─────────────────┐       ┌─────────────┐
+│ Użytkownik   │       │   Agent LLM     │       │  Judge LLM  │
+│ Pytanie      │──────▶│ (testowany)     │──────▶│ (oceniający)│
+│              │       │                 │       │             │
+│ „Gdzie jest  │       │  Wywołuje       │       │ Analizuje   │
+│  moje        │       │  narzędzia,     │       │ trace i     │
+│  zamówienie?"│       │  generuje       │       │ wynik,      │
+│              │       │  odpowiedź      │       │ wystawia    │
+│              │       │                 │       │ ocenę       │
+└─────────────┘       └─────────────────┘       └─────────────┘
+                                                       │
+                                                  Wynik: 0.85
+                                                  PASS ✓
+```
+
+### Dlaczego nie pozwolić agentowi oceniać samego siebie?
+
+Używanie tego samego LLM do generowania i oceniania tworzy konflikt interesów — jak ocenianie własnego egzaminu. Badania pokazują, że LLM mają tendencję do oceniania własnych wyników łaskawiej niż wyników innych modeli. Nazywa się to **self-evaluation bias** (błąd samooceny).
+
+### Konfiguracja cross-vendor — nasze podejście
+
+W naszych plikach testowych celowo używamy **różnych dostawców** dla agenta i dla sędziego:
+
+| Rola | Model | Dostawca | Cel |
+|------|-------|----------|-----|
+| Agent LLM (system testowany) | Claude / GPT-4o | Anthropic / OpenAI | Uruchamia agenta, generuje odpowiedzi |
+| Judge LLM (oceniający) | GPT-4o | OpenAI | Ocenia działanie agenta |
+
+Taka konfiguracja cross-vendor oznacza, że:
+- Agent (uczeń) i sędzia (nauczyciel) pochodzą z różnych „rodzin".
+- Sędzia nie jest stronniczy wobec wyników agenta.
+- Ocena jest bardziej obiektywna i wiarygodna.
+
+### Co właściwie robi sędzia
+
+Gdy uruchamia się metryka taka jak `TaskCompletionMetric`, wewnętrznie dzieje się to:
+
+1. DeepEval buduje **prompt oceniający** — starannie zaprojektowany prompt, który mówi judge LLM dokładnie, co i jak ocenić.
+2. Prompt zawiera dane wejściowe użytkownika, pełny trace agenta (wywołania narzędzi, kroki pośrednie, końcową odpowiedź) oraz kryteria oceny.
+3. Judge LLM czyta wszystko i zwraca:
+   - **Wynik** (od 0.0 do 1.0)
+   - **Uzasadnienie** (tekstowe wyjaśnienie, dlaczego wystawił taki wynik)
+4. DeepEval porównuje wynik z progiem i raportuje pass/fail.
+
+Prompty oceniające zostały zaprojektowane przez autorów DeepEval z użyciem najlepszych praktyk prompt engineeringu — nie piszesz ich samodzielnie. Każda metryka ma własny szablon promptu oceniającego, zoptymalizowany pod konkretny wymiar jakości.
+
+### Sędzia nie jest idealny — i to w porządku
+
+Judge LLM to też AI, więc również jest niedeterministyczny. Ten sam wynik agenta może dostać 0.78 w jednym uruchomieniu i 0.82 w następnym. Dlatego:
+
+- **Progi powinny mieć margines.** Jeśli Twoja rzeczywista minimalna akceptowalna jakość to 0.8, ustaw próg na 0.7, aby pochłonąć rozrzut ocen.
+- **Uruchamiaj evals wielokrotnie**, gdy wyniki są graniczne.
+- **Patrz na uzasadnienia**, nie tylko na wyniki. Metryki DeepEval często podają tekstowe wyjaśnienie wyniku — jest ono bardziej informatywne niż sama liczba.
+
+---
+
+## 5. Podsumowanie — pomost do `test_agent.py`
+
+Masz już pełny model mentalny:
+
+1. **Systemy AI są niedeterministyczne** — te same dane wejściowe, za każdym razem inny wynik. Tradycyjne testowanie przez `assert` się załamuje.
+
+2. **Evals zastępują asercje** — zamiast „czy wynik to dokładnie X?" pytamy „jak dobry jest wynik w wymiarze Y?" i dostajemy wynik od 0 do 1.
+
+3. **DeepEval dostarcza framework** — metryki, przypadki testowe (Golden), instrumentację (tracing) i pętlę ewaluacji.
+
+4. **Punktację robi Judge LLM** — osobny, bezstronny model czyta pracę agenta i ją ocenia.
+
+Mając ten fundament, otwórz `test_agent.py`. Zobaczysz:
+- **Dwie metryki:** `TaskCompletionMetric` (czy agent wykonał zadanie?) i `ToolCorrectnessMetric` (czy wybrał właściwe narzędzie?).
+- **Cztery Golden:** cztery scenariusze testowe, każdy z danymi wejściowymi i oczekiwanymi narzędziami.
+- **Pętlę ewaluacji:** `evals_iterator` przechodzi przez każdy golden, uruchamia agenta, rejestruje trace i pozwala sędziemu go ocenić.
+- **Konfigurację cross-vendor:** Claude uruchamia agenta, GPT-4o uruchamia sędziego.
+
+Wszystko w `test_agent.py` jest bezpośrednim zastosowaniem pojęć z tego dokumentu. Zaczynamy.
+
+---
+
+## Krótki słowniczek
+
+| Termin | Definicja |
+|--------|-----------|
+| **Eval** | Ustrukturyzowany proces mierzenia jakości wyniku AI w konkretnym wymiarze. Zwraca wynik (0–1), a nie pass/fail. |
+| **Metric (metryka)** | Konkretne kryterium oceny (np. AnswerRelevancy, Faithfulness, ToolCorrectness). Każda metryka mierzy jeden wymiar jakości. |
+| **Golden** | Przypadek testowy — zawiera dane wejściowe do wysłania agentowi oraz oczekiwane wartości (oczekiwany wynik, oczekiwane narzędzia) do porównania. |
+| **EvaluationDataset** | Zbiór Golden tworzący jeden zestaw ewaluacyjny. |
+| **Judge LLM** | Osobny LLM używany do oceniania wyników agenta. To nie ten sam model, który jest testowany. |
+| **Threshold (próg)** | Minimalny wynik (0–1), przy którym metryka przechodzi. Ustawiany przez autora testu na podstawie wymagań jakościowych. |
+| **Trace** | Pełny zapis wykonania agenta — każde wywołanie narzędzia, krok pośredni i końcowa odpowiedź. Rejestrowany przez instrumentację DeepEval. |
+| **Niedeterministyczny** | Zwracający różne wyniki dla tych samych danych wejściowych w kolejnych uruchomieniach. Jest to cecha LLM i powód, dla którego tradycyjne testowanie nie działa. |
+| **Cross-vendor** | Używanie różnych dostawców LLM dla agenta (np. Claude od Anthropic) i dla sędziego (np. GPT-4o od OpenAI), aby uniknąć błędu samooceny. |
+| **Instrumentation (instrumentacja)** | Kod dodany do agenta (jak `CallbackHandler` i `@observe` z DeepEval), który rejestruje trace wykonania bez zmieniania zachowania agenta. |
+| **DeepEval** | Open-source'owy framework w Pythonie do oceny aplikacji LLM. Dostarcza metryki, tracing i infrastrukturę testową. |
+
+  
+  Tracing = wgląd w wykonanie agenta
+
+  Gdy agent działa, wewnętrznie robi wiele rzeczy — wywołanie LLM, potem wywołanie narzędzia, potem kolejne wywołanie LLM. Tracing rejestruje każdy z tych
+  wewnętrznych kroków jako spany, dzięki czemu DeepEval widzi, co się działo na każdym poziomie, a nie tylko końcowy wynik.
+
+  ---
+  Dlaczego testy bezpieczeństwa nie potrzebują tracingu
+
+  BiasMetric, ToxicityMetric, PIILeakageMetric patrzą tylko na końcowy tekst wyjściowy. Nie obchodzi ich, jak agent do niego doszedł — bez narzędzi, bez kroków
+  pośrednich. Tylko: „przeczytaj tę odpowiedź, czy jest stronnicza?". Tracing nie jest więc potrzebny.
+
+  ---
+  Dlaczego pozostałe testy potrzebują tracingu
+
+  - ToolCorrectnessMetric — musi wiedzieć, które narzędzia zostały wywołane podczas działania. Ta informacja znajduje się wewnątrz wykonania agenta, a nie
+   w końcowym wyniku. Tracing rejestruje span narzędzia, żeby DeepEval mógł odczytać tools_called.
+  - TaskCompletionMetric, StepEfficiencyMetric — sędzia musi zobaczyć pełną sekwencję kroków agenta, a nie tylko odpowiedź.
+  - ContextualPrecision/Recall — musi zobaczyć, które fragmenty zostały pobrane wewnątrz pipeline'u RAG. Jest to rejestrowane jako span retrieval.
+
+  ---
+  Wersja w jednym zdaniu:
+
+  ▎ Jeśli metryka czyta tylko końcową odpowiedź → tracing niepotrzebny.
+  ▎ Jeśli metryka musi zajrzeć do kroków agenta → tracing jest wymagany.
+
+  @observe tworzy zewnętrzny trace, CallbackHandler rejestruje każdy span LangChain wewnątrz niego, a update_current_trace to sposób na jawne dołączenie
+  tools_called, retrieval_context i expected_tools, aby metryki mogły je znaleźć.
+
+- tools_called jest zakodowane na sztywno — mówisz DeepEval „te narzędzia zostały wywołane", nie uruchamiasz faktycznie agenta
+  - actual_output jest zakodowane na sztywno — mówisz DeepEval „tak odpowiedział agent"
+  - Brak evals_iterator, brak @observe, brak CallbackHandler — w ogóle brak tracingu
+
+  DeepEval po prostu wierzy Ci na słowo i ocenia względem expected_tools.
+
+  ---
+  W naszym test_agent.py ta sama metryka działa inaczej:
+
+  # my — agent działa na żywo, narzędzia rejestrowane przez tracing
+  for golden in dataset.evals_iterator(metrics=[tool_correctness]):
+      support_agent(golden.input)   # @observe automatycznie rejestruje tools_called
+
+  @observe + CallbackHandler obserwują agenta w czasie rzeczywistym i uzupełniają tools_called w trace. evals_iterator odczytuje ten trace, aby wewnętrznie
+  zbudować LLMTestCase — nigdy sam nie piszesz tools_called.
+
+  ---
+  Przykład z dokumentacji to więc w zasadzie wzorzec statyczny zastosowany do testowania narzędzi — przydatny, jeśli masz już zarejestrowany log rozmowy i chcesz
+  sprawdzić, czy uruchomiły się właściwe narzędzia. Ale jeśli chcesz testować agenta na żywo, to tracing sprawia, że działa to bez konieczności zakodowywania czegokolwiek na sztywno.
 To capture live tools_called and actual_output from a real agent, you should instrument your agent with the @observe decorator and use update_current_span / update_current_trace to record the data as it flows through your app. Then drive evaluation with EvaluationDataset and evals_iterator().
