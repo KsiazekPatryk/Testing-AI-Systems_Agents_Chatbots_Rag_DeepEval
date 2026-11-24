@@ -1,8 +1,11 @@
 deepeval
+langfuse
 langchain
 langchain-openai
 langchain-anthropic
+langchain-mcp-adapters
 langgraph
 langchain-core
+nest_asyncio
 openai
 python-dotenv

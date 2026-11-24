@@ -19,6 +19,7 @@ without ever touching this file again.
 
 import asyncio
 import os
+import sys
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -34,6 +35,9 @@ from langchain.agents import create_agent
 # --- (1) NEW: import DeepEval tracing primitives --------------------------
 from deepeval.integrations.langchain import CallbackHandler
 from deepeval.tracing.context import update_current_trace
+
+# --- Langfuse tracing — reads LANGFUSE_* keys from .env --------------------
+from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +86,7 @@ llm = ChatAnthropic(model="claude-sonnet-4-6", temperature=0)
 _mcp_tools = asyncio.run(
     MultiServerMCPClient({
         "shopease": {
-            "command": "python",
+            "command": sys.executable,
             "args": [os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py")],
             "transport": "stdio",
         }
@@ -106,13 +110,17 @@ agent = create_agent(
 # anything LangChain owns.
 deepeval_callback = CallbackHandler()
 
+# Langfuse handler — sends every LangChain run (LLM calls, tool calls, chain
+# steps) to Langfuse as a trace. Works side by side with the DeepEval handler.
+langfuse_callback = LangfuseCallbackHandler()
+
 
 def support_agent(user_input: str) -> str:
     """Run the agent on a user message and return the final reply."""
     # --- (3) NEW: pass the callback handler in the .invoke() config ------
     result = asyncio.run(agent.ainvoke(
         {"messages": [{"role": "user", "content": user_input}]},
-        config={"callbacks": [deepeval_callback]},
+        config={"callbacks": [deepeval_callback, langfuse_callback]},
     ))
     reply = result["messages"][-1].content
     update_current_trace(output=reply)
@@ -121,3 +129,7 @@ def support_agent(user_input: str) -> str:
 
 if __name__ == "__main__":
     print(support_agent("Where is my order ORD-1042?"))
+
+    # Flush buffered Langfuse events before the short-lived script exits.
+    from langfuse import get_client
+    get_client().flush()

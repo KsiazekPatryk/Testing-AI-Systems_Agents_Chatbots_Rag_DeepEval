@@ -30,6 +30,8 @@ from langchain.agents import create_agent
 from deepeval.integrations.langchain import CallbackHandler
 from deepeval.tracing.context import update_current_trace
 
+from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
+
 
 # ---------------------------------------------------------------------------
 # Knowledge base — product and shipping policies as plain-text documents.
@@ -118,6 +120,10 @@ agent = create_agent(
 # DeepEval callback handler — captures LangChain spans automatically.
 deepeval_callback = CallbackHandler()
 
+# Langfuse handler — sends LangChain runs (LLM, retrieval tool, chain steps)
+# to Langfuse as traces, alongside DeepEval.
+langfuse_callback = LangfuseCallbackHandler()
+
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -129,7 +135,7 @@ def rag_support_agent(user_input: str) -> str:
 
     result = agent.invoke(
         {"messages": [{"role": "user", "content": user_input}]},
-        config={"callbacks": [deepeval_callback]},
+        config={"callbacks": [deepeval_callback, langfuse_callback]},
     )
     reply = result["messages"][-1].content
 
@@ -144,3 +150,7 @@ def rag_support_agent(user_input: str) -> str:
 
 if __name__ == "__main__":
     print(rag_support_agent("What is the return policy for electronics?"))
+
+    # Flush buffered Langfuse events before the short-lived script exits.
+    from langfuse import get_client
+    get_client().flush()
