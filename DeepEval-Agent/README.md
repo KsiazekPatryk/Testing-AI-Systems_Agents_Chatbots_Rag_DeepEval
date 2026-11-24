@@ -73,6 +73,50 @@ versa). That's the moment that makes component-level evaluation click.
 
 ---
 
+## Metric: Task Completion
+
+**Category:** Agentic / trace-level
+
+**What it measures:** `TaskCompletionMetric` evaluates whether the agent
+successfully completed the task the user asked it to do, end to end. It looks
+at the full trace of the agent's execution — the input, the tools it called,
+the intermediate results, and the final response — and judges whether the
+overall outcome satisfies the user's request.
+
+**Why it matters:** An agent might call the right tool but still fail the task
+(e.g. it looks up the order but gives the user incorrect information). Or it
+might call the wrong tool and still stumble into a helpful answer. Task
+Completion captures the holistic outcome — did the user walk away with what
+they needed?
+
+**Minimal example** (see `test_TaskCompletion.py`):
+
+```python
+from deepeval.test_case import LLMTestCase
+from deepeval import evaluate
+from deepeval.metrics import TaskCompletionMetric
+from agent_instrumented import support_agent
+
+actual_output = support_agent("Where is my order ORD-1042?")
+
+test_case = LLMTestCase(
+    input="Where is my order ORD-1042?",
+    actual_output=actual_output,
+)
+
+evaluate(
+    test_cases=[test_case],
+    metrics=[TaskCompletionMetric(threshold=0.7, model="claude-sonnet-4-6")],
+)
+```
+
+The metric is LLM-based: a judge model (here Claude) infers the user's goal
+from the input, compares it against what actually happened, and returns a
+score between 0 and 1 plus a reason. The test passes when the score meets the
+`threshold`.
+
+---
+
 ## Suggested lesson flow
 
 | Minute | Activity |
@@ -178,6 +222,50 @@ DeepEval wykona następujące kroki:
 Trzeci golden jest celowo graniczny — zwróć uwagę na ciekawy przypadek,
 w którym Task Completion może przejść, a Tool Correctness nie (lub odwrotnie).
 To moment, w którym ewaluacja na poziomie komponentów „klika".
+
+---
+
+## Metryka: Task Completion
+
+**Kategoria:** agentowa / na poziomie trace
+
+**Co mierzy:** `TaskCompletionMetric` ocenia, czy agent pomyślnie wykonał
+zadanie, o które poprosił użytkownik — od początku do końca. Analizuje pełny
+trace wykonania agenta: wejście, wywołane narzędzia, wyniki pośrednie i
+końcową odpowiedź — i ocenia, czy całościowy rezultat spełnia prośbę
+użytkownika.
+
+**Dlaczego to ważne:** Agent może wywołać właściwe narzędzie, a mimo to nie
+wykonać zadania (np. sprawdzi zamówienie, ale poda użytkownikowi błędne
+informacje). Może też wywołać złe narzędzie i mimo wszystko trafić na pomocną
+odpowiedź. Task Completion mierzy rezultat całościowo — czy użytkownik
+otrzymał to, czego potrzebował?
+
+**Minimalny przykład** (zobacz `test_TaskCompletion.py`):
+
+```python
+from deepeval.test_case import LLMTestCase
+from deepeval import evaluate
+from deepeval.metrics import TaskCompletionMetric
+from agent_instrumented import support_agent
+
+actual_output = support_agent("Where is my order ORD-1042?")
+
+test_case = LLMTestCase(
+    input="Where is my order ORD-1042?",
+    actual_output=actual_output,
+)
+
+evaluate(
+    test_cases=[test_case],
+    metrics=[TaskCompletionMetric(threshold=0.7, model="claude-sonnet-4-6")],
+)
+```
+
+Metryka jest oparta na LLM: model-sędzia (tutaj Claude) wywnioskowuje cel
+użytkownika z wejścia, porównuje go z tym, co faktycznie się wydarzyło, i
+zwraca wynik od 0 do 1 wraz z uzasadnieniem. Test przechodzi, gdy wynik
+osiąga wartość `threshold`.
 
 ---
 

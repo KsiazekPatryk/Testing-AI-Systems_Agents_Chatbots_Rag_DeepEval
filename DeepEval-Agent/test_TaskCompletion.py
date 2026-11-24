@@ -11,4 +11,4 @@ test_case = LLMTestCase(
 )
 
 evaluate(test_cases = [test_case],
-         metrics = [TaskCompletionMetric.TaskCompletionMetric(threshold=0.7, model="claude-sonnet-4-6")])
+         metrics = [TaskCompletionMetric.TaskCompletionMetric(threshold=0.7, model="gpt-4o")])
