@@ -16,6 +16,8 @@ agent, GPT-4o as the judge).
 | `agent_plain.py` | Developer (before evals exist) | A normal LangChain + Claude agent. No DeepEval code anywhere. |
 | `agent_instrumented.py` | Developer (after QA asks) | The **same** agent, with **4 lines added** to make it observable to DeepEval. |
 | `test_agent.py` | QA / Tester (you) | Imports the agent, defines goldens, runs metrics. |
+| `test_TaskCompletion.py` | QA / Tester (you) | Minimal Task Completion example on a single `LLMTestCase`. |
+| `test_TracingComponentsTest.py` | QA / Tester (you) | Trace-based eval: goldens with `expected_tools`, Task Completion + Tool Correctness via `evals_iterator`. |
 
 ---
 
@@ -117,6 +119,55 @@ score between 0 and 1 plus a reason. The test passes when the score meets the
 
 ---
 
+## Trace-based evaluation with expected tools (`test_TracingComponentsTest.py`)
+
+This test evaluates the agent through DeepEval tracing instead of a
+hand-built `LLMTestCase`:
+
+1. Goldens carry `expected_tools` (e.g. `ToolCall(name="get_order_status", input_parameters={"order_id": "ORD-1042"})`).
+2. A thin `@observe(name="support_agent")` wrapper calls the instrumented agent.
+   Inside it, `get_current_golden()` reads the current golden and
+   `update_current_trace(expected_tools=...)` attaches the expected tools to the trace.
+   Actual `tools_called` are captured automatically by tracing.
+3. `dataset.evals_iterator(metrics=[task_completion, tool_correctness])` runs
+   each golden and applies **Task Completion** and **Tool Correctness**.
+
+```bash
+python test_TracingComponentsTest.py
+```
+
+Notes:
+- `Golden(...)` and `ToolCall(...)` are passed `multimodal=False` / `input_parameters=...`
+  explicitly only to silence false-positive Pylance "argument missing" warnings.
+  Both are optional at runtime.
+- Imports: `observe` from `deepeval.tracing`, `update_current_trace` from
+  `deepeval.tracing.context`, `get_current_golden` from `deepeval.contextvars`.
+
+---
+
+## Inspecting a run in the terminal (`deepeval inspect`)
+
+`deepeval inspect` is a built-in CLI command (no separate package) that opens a
+terminal UI with the trace tree: metric scores and reasons, inputs/outputs,
+tool calls and retriever context. It needs an extra:
+
+```bash
+pip install 'deepeval[inspect]'      # quotes are required in zsh
+
+python test_TracingComponentsTest.py # writes .deepeval/.latest_run_full.json
+deepeval inspect                     # opens the latest run
+deepeval inspect ./experiments       # or a folder / test_run_*.json file
+```
+
+If `zsh: command not found: deepeval`, the Python `bin` directory is not on
+`PATH`. Add it (for python.org Python 3.13 on macOS):
+
+```bash
+export PATH="/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
+```
+
+---
+
 ## Suggested lesson flow
 
 | Minute | Activity |
@@ -168,6 +219,8 @@ Completion** i **Tool Correctness**, zastosowane w konfiguracji cross-vendor
 | `agent_plain.py` | Developer (zanim pojawią się evals) | Zwykły agent LangChain + Claude. Zero kodu DeepEval. |
 | `agent_instrumented.py` | Developer (po prośbie QA) | **Ten sam** agent, z **4 dodanymi liniami**, które czynią go obserwowalnym dla DeepEval. |
 | `test_agent.py` | QA / Tester (Ty) | Importuje agenta, definiuje goldeny, uruchamia metryki. |
+| `test_TaskCompletion.py` | QA / Tester (Ty) | Minimalny przykład Task Completion na pojedynczym `LLMTestCase`. |
+| `test_TracingComponentsTest.py` | QA / Tester (Ty) | Ewaluacja oparta na trace: goldeny z `expected_tools`, Task Completion + Tool Correctness przez `evals_iterator`. |
 
 ---
 
@@ -266,6 +319,55 @@ Metryka jest oparta na LLM: model-sędzia (tutaj Claude) wywnioskowuje cel
 użytkownika z wejścia, porównuje go z tym, co faktycznie się wydarzyło, i
 zwraca wynik od 0 do 1 wraz z uzasadnieniem. Test przechodzi, gdy wynik
 osiąga wartość `threshold`.
+
+---
+
+## Ewaluacja oparta na trace z oczekiwanymi narzędziami (`test_TracingComponentsTest.py`)
+
+Ten test ocenia agenta przez tracing DeepEval, a nie przez ręcznie budowany
+`LLMTestCase`:
+
+1. Goldeny zawierają `expected_tools` (np. `ToolCall(name="get_order_status", input_parameters={"order_id": "ORD-1042"})`).
+2. Cienki wrapper `@observe(name="support_agent")` wywołuje agenta instrumentowanego.
+   W środku `get_current_golden()` odczytuje bieżący golden, a
+   `update_current_trace(expected_tools=...)` dołącza oczekiwane narzędzia do trace.
+   Faktycznie wywołane `tools_called` rejestruje automatycznie tracing.
+3. `dataset.evals_iterator(metrics=[task_completion, tool_correctness])` uruchamia
+   każdy golden i stosuje **Task Completion** oraz **Tool Correctness**.
+
+```bash
+python test_TracingComponentsTest.py
+```
+
+Uwagi:
+- `multimodal=False` w `Golden(...)` i `input_parameters=...` w `ToolCall(...)` są podane
+  jawnie tylko po to, by uciszyć fałszywe ostrzeżenia Pylance „argument missing".
+  W runtime oba są opcjonalne.
+- Importy: `observe` z `deepeval.tracing`, `update_current_trace` z
+  `deepeval.tracing.context`, `get_current_golden` z `deepeval.contextvars`.
+
+---
+
+## Podgląd przebiegu w terminalu (`deepeval inspect`)
+
+`deepeval inspect` to wbudowana komenda CLI (bez osobnego pakietu), która otwiera
+interfejs w terminalu z drzewem trace: wyniki i uzasadnienia metryk, wejście/wyjście,
+wywołania narzędzi i kontekst retrievera. Wymaga dodatku:
+
+```bash
+pip install 'deepeval[inspect]'      # cudzysłowy są wymagane w zsh
+
+python test_TracingComponentsTest.py # zapisuje .deepeval/.latest_run_full.json
+deepeval inspect                     # otwiera ostatni przebieg
+deepeval inspect ./experiments       # albo folder / plik test_run_*.json
+```
+
+Jeśli pojawi się `zsh: command not found: deepeval`, katalog `bin` Pythona nie
+jest w `PATH`. Dodaj go (dla Pythona 3.13 z python.org na macOS):
+
+```bash
+export PATH="/Library/Frameworks/Python.framework/Versions/3.13/bin:$PATH"
+```
 
 ---
 
